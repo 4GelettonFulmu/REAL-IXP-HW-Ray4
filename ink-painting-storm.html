@@ -1,0 +1,947 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>水墨风波浪 - 抉择之筏 | Ink Painting Storm</title>
+<style>
+  /* ==================== 全局样式 ==================== */
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #f6f6f6; /* 纸面底色偏浅，衬出深墨 */
+    height: 100%;
+    overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC",
+                 "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, "Noto Sans CJK SC",
+                 sans-serif;
+  }
+
+  /* 主画布 */
+  #stage {
+    position: fixed;
+    inset: 0;
+    display: block;
+    cursor: pointer;
+  }
+
+  /* ==================== UI 层 ==================== */
+  .ui {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+  }
+
+  /* 顶部标题与选项区 */
+  .hud {
+    position: absolute;
+    left: 50%;
+    top: 8vh;
+    transform: translateX(-50%);
+    text-align: center;
+    pointer-events: auto;
+  }
+
+  .title {
+    font-size: 20px;
+    font-weight: 600;
+    color: #111;
+    letter-spacing: 1px;
+    margin-bottom: 10px;
+  }
+
+  .subtitle {
+    font-size: 14px;
+    color: #333;
+    opacity: .8;
+    margin-bottom: 18px;
+  }
+
+  /* 决策按钮容器 */
+  .choices {
+    display: inline-flex;
+    gap: 12px;
+  }
+
+  /* 决策按钮样式 */
+  button.choice {
+    background: #111;
+    color: #fff;
+    border: none;
+    padding: 10px 16px;
+    border-radius: 999px;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0,0,0,.1);
+    transition: transform .12s ease, box-shadow .2s ease, background .2s ease;
+    font-size: 14px;
+  }
+
+  button.choice:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 16px rgba(0,0,0,.15);
+    background: #000;
+  }
+
+  button.choice:active {
+    transform: translateY(0);
+  }
+
+  /* 底部提示消息 */
+  .toast {
+    position: absolute;
+    left: 50%;
+    bottom: 6vh;
+    transform: translateX(-50%);
+    background: rgba(17,17,17,.9);
+    color: #fff;
+    padding: 10px 14px;
+    border-radius: 10px;
+    font-size: 13px;
+    letter-spacing: .5px;
+    pointer-events: auto;
+    display: none;
+    max-width: 80%;
+    text-align: center;
+  }
+
+  .toast.show {
+    display: inline-block;
+  }
+
+  /* 重置按钮容器 */
+  .reset-wrap {
+    position: absolute;
+    right: 16px;
+    bottom: 16px;
+    pointer-events: auto;
+  }
+
+  .reset-btn {
+    border: none;
+    background: rgba(17,17,17,.85);
+    color: #fff;
+    padding: 8px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: background .2s ease;
+  }
+
+  .reset-btn:hover {
+    background: rgba(0,0,0,.95);
+  }
+
+  /* 操作提示 */
+  .hint {
+    position: absolute;
+    left: 50%;
+    bottom: 12vh;
+    transform: translateX(-50%);
+    color: #444;
+    opacity: .9;
+    font-size: 12px;
+    letter-spacing: .5px;
+    text-align: center;
+  }
+
+  /* 响应式调整 */
+  @media (max-width: 600px) {
+    .title {
+      font-size: 16px;
+    }
+    .subtitle {
+      font-size: 12px;
+    }
+    .choices {
+      flex-direction: column;
+      gap: 8px;
+    }
+  }
+</style>
+</head>
+<body>
+
+<!-- 主画布 -->
+<canvas id="stage"></canvas>
+
+<!-- UI 覆盖层 -->
+<div class="ui" id="ui">
+  <!-- 顶部标题与决策区 -->
+  <div class="hud" id="hud">
+    <div class="title">风起浪涌，你会如何抉择？</div>
+    <div class="subtitle">鼠标悬停或轻触屏幕，会让波浪更汹涌。</div>
+    <div class="choices">
+      <button class="choice" id="keep">保护宝藏</button>
+      <button class="choice" id="drop">抛弃宝藏</button>
+    </div>
+  </div>
+
+  <!-- 移动端提示 -->
+  <div class="hint" id="hint">提示：移动端轻触屏幕也能激起波浪</div>
+
+  <!-- 消息提示框 -->
+  <div class="toast" id="toast"></div>
+
+  <!-- 重置按钮 -->
+  <div class="reset-wrap">
+    <button class="reset-btn" id="reset">重来一次</button>
+  </div>
+</div>
+
+<script>
+;(() => {
+  'use strict';
+
+  // ====================================================================
+  // 可调参数 SETTINGS
+  // ====================================================================
+  const SETTINGS = {
+    // ========== 波浪线参数 ==========
+    lineWidth: 20,              // 波浪线条粗细（px）- 约20px视觉效果
+    lineSpacing: 28,            // 波浪线之间的垂直间距（px）- 建议26-30px
+    waveColor: '#111',          // 波浪线颜色（极深灰，便于墨滴更黑）
+
+    // ========== 天空背景 ==========
+    bgTop: '#fafafa',           // 天空顶部（纸面浅色）
+    bgBottom: '#efefef',        // 天空底部
+
+    // ========== 波浪动画参数 ==========
+    baseAmp: 14,                // 基础振幅（px）
+    hoverAmpMul: 1.8,           // 悬停时振幅乘子（1.5-2.0）
+    baseSpeed: 0.5,             // 相位基础速度
+    hoverSpeedMul: 1.6,         // 悬停速度乘子（1.5-2.0）
+    freq: 0.010,                // 水平频率（越大波越密）
+    ampJitter: 0.5,             // 每条线振幅微扰比例
+    speedJitter: 0.25,          // 每条线相位速度微扰比例
+
+    // ========== 雨滴参数 ==========
+    rainCount: 140,             // 雨滴数量
+    rainSpeedMin: 600,          // 雨滴速度范围（px/s）
+    rainSpeedMax: 1000,
+    rainLenMin: 8,              // 雨滴可视长度范围（px）
+    rainLenMax: 18,
+
+    // ========== 墨滴晕染参数 ==========
+    inkSpawnChance: 0.4,        // 雨滴触线转换为墨滴的概率
+    inkRadiusMin: 8,            // 墨滴初始半径范围（px）
+    inkRadiusMax: 20,
+    inkBlur: 10,                // 墨滴模糊强度（px）
+    inkAlpha: 0.08,             // 墨滴绘制不透明度
+    inkDecay: 0.035,            // 墨滴逐帧整体衰减强度
+
+    // ========== 木筏与人物参数 ==========
+    raftWidth: 120,             // 木筏宽度（px）
+    raftHeight: 18,             // 木筏厚度（px）
+    raftTiltLimit: 0.45,        // 木筏最大倾角（弧度，约25度）
+    raftSinkKeep: 8,            // 保护宝藏时的额外下沉偏移（px）
+    raftSinkDrop: 2,            // 抛弃宝藏时的额外下沉偏移（px）
+
+    // ========== 剧情动画参数 ==========
+    capsizeProb: 0.4,           // 倾覆概率（保护宝藏分支）- 40%
+    capsizeTime: 1.2,           // 倾覆动画时长（秒）- 0.8-1.6s范围
+    sinkSpeed: 120,             // 落水下沉速度（px/s）
+    surviveDriftTime: 2.8,      // 保护且未倾覆时，艰难穿越动画时长（秒）
+    escapeDriftTime: 2.0,       // 抛弃宝藏时，顺利穿越时长（秒）
+
+    // ========== 性能参数 ==========
+    dpiClamp: 2                 // 限制绘制 DPR，避免超高分屏过载
+  };
+
+  // ====================================================================
+  // 全局状态与画布初始化
+  // ====================================================================
+
+  // 主画布
+  const canvas = document.getElementById('stage');
+  const ctx = canvas.getContext('2d');
+
+  // 离屏画布：墨滴层
+  const inkCanvas = document.createElement('canvas');
+  const inkCtx = inkCanvas.getContext('2d');
+
+  // 离屏画布：波浪遮罩
+  const waveMaskCanvas = document.createElement('canvas');
+  const waveMaskCtx = waveMaskCanvas.getContext('2d');
+
+  // 离屏画布：遮罩后的墨滴（合成结果）
+  const inkMaskedCanvas = document.createElement('canvas');
+  const inkMaskedCtx = inkMaskedCanvas.getContext('2d');
+
+  // 画布尺寸与设备像素比
+  let W = 0, H = 0, DPR = 1;
+
+  // 交互状态
+  let isHover = false;        // 是否悬停/触摸
+  let lastT = performance.now();
+
+  // 波浪参数
+  let lineCount = 0;          // 波浪线条数
+  let phases = [];            // 每条线独立相位偏移
+  let ampMul = 1.0;           // 当前振幅乘子（缓动）
+  let speedMul = 1.0;         // 当前速度乘子（缓动）
+
+  // ====================================================================
+  // 决策与剧情状态机
+  // ====================================================================
+  const State = {
+    Idle: 'idle',             // 初始状态，等待决策
+    ChosenKeep: 'keep',       // 已选择保护宝藏
+    ChosenDrop: 'drop',       // 已选择抛弃宝藏
+    Capsizing: 'capsizing',   // 倾覆中
+    Sinking: 'sinking',       // 已倾覆，人物沉水中
+    Survive: 'survive',       // 保护宝藏但未倾覆，艰难穿越
+    Escaped: 'escaped'        // 抛弃宝藏，顺利穿越
+  };
+
+  let storyState = State.Idle;
+  let storyTimer = 0;
+  let capsizeTarget = false;  // 是否触发倾覆
+
+  // ====================================================================
+  // 木筏与小人数据结构
+  // ====================================================================
+  const raft = {
+    x: 0,                     // 木筏中心 x 坐标
+    y: 0,                     // 木筏中心 y 坐标
+    angle: 0,                 // 木筏倾斜角度
+    massSink: 0,              // 受决策影响的额外下沉
+    drift: 0,                 // 横向穿越进度（0->1）
+    driftDuration: 1,         // 动画时长
+    person: {
+      x: 0,                   // 人物 x 坐标
+      y: 0,                   // 人物 y 坐标
+      alive: true,            // 是否存活
+      sinking: false,         // 是否正在下沉
+      sinkY: 0,               // 下沉时的 y 坐标
+      alpha: 1                // 不透明度（下沉时渐隐）
+    }
+  };
+
+  // ====================================================================
+  // 雨滴数组
+  // ====================================================================
+  const raindrops = [];
+
+  // ====================================================================
+  // UI 元素引用
+  // ====================================================================
+  const keepBtn = document.getElementById('keep');
+  const dropBtn = document.getElementById('drop');
+  const resetBtn = document.getElementById('reset');
+  const toast = document.getElementById('toast');
+
+  // ====================================================================
+  // 工具函数
+  // ====================================================================
+
+  // 限制数值范围
+  function clamp(v, a, b) {
+    return Math.max(a, Math.min(b, v));
+  }
+
+  // 线性插值
+  function lerp(a, b, t) {
+    return a + (b - a) * t;
+  }
+
+  // 缓动函数（ease-in-out）
+  function easeInOut(t) {
+    return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+  }
+
+  // 随机数范围
+  function rand(a, b) {
+    return a + Math.random() * (b - a);
+  }
+
+  // 随机整数范围
+  function randInt(a, b) {
+    return Math.floor(rand(a, b + 1));
+  }
+
+  // ====================================================================
+  // 尺寸调整与初始化
+  // ====================================================================
+  function resize() {
+    const cssW = window.innerWidth;
+    const cssH = window.innerHeight;
+    const dpr = clamp(window.devicePixelRatio || 1, 1, SETTINGS.dpiClamp);
+
+    W = cssW;
+    H = cssH;
+    DPR = dpr;
+
+    // 设置所有画布的尺寸与 DPR 缩放
+    [canvas, inkCanvas, waveMaskCanvas, inkMaskedCanvas].forEach(c => {
+      c.width = Math.floor(cssW * dpr);
+      c.height = Math.floor(cssH * dpr);
+      c.style.width = cssW + 'px';
+      c.style.height = cssH + 'px';
+      const cctx = c.getContext('2d');
+      cctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    });
+
+    // 计算波浪线条数（从上到下填满屏幕）
+    lineCount = Math.ceil(H / SETTINGS.lineSpacing) + 2;
+
+    // 初始化每条线的独立相位
+    phases = new Array(lineCount).fill(0).map(() => Math.random() * Math.PI * 2);
+
+    // 初始化雨滴
+    initRain();
+
+    // 复位木筏与人物位置
+    raft.x = W * 0.5;
+    raft.y = H * 0.5;
+    raft.angle = 0;
+    raft.person.x = raft.x;
+    raft.person.y = raft.y - SETTINGS.raftHeight * 2;
+    raft.person.alive = true;
+    raft.person.sinking = false;
+    raft.person.sinkY = raft.person.y;
+    raft.person.alpha = 1;
+
+    // 绘制初始波浪遮罩
+    drawWaveMask();
+  }
+
+  // 监听窗口尺寸变化
+  window.addEventListener('resize', resize);
+
+  // ====================================================================
+  // 雨滴系统
+  // ====================================================================
+
+  /**
+   * 初始化雨滴数组
+   */
+  function initRain() {
+    raindrops.length = 0;
+    for (let i = 0; i < SETTINGS.rainCount; i++) {
+      raindrops.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        v: rand(SETTINGS.rainSpeedMin, SETTINGS.rainSpeedMax),
+        len: rand(SETTINGS.rainLenMin, SETTINGS.rainLenMax),
+        cooldown: 0 // 用于避免一帧内重复落线生成墨滴
+      });
+    }
+  }
+
+  /**
+   * 更新雨滴位置与墨滴生成
+   */
+  function updateRain(dt) {
+    const t = performance.now() * 0.001;
+
+    for (const r of raindrops) {
+      // 下落
+      r.y += r.v * dt;
+
+      // 循环：超出屏幕底部则重置到顶部
+      if (r.y - r.len > H) {
+        r.y = -Math.random() * H * 0.25;
+        r.x = Math.random() * W;
+        r.v = rand(SETTINGS.rainSpeedMin, SETTINGS.rainSpeedMax);
+        r.len = rand(SETTINGS.rainLenMin, SETTINGS.rainLenMax);
+        r.cooldown = 0;
+      }
+
+      // 冷却计时
+      if (r.cooldown > 0) r.cooldown -= dt;
+
+      // 检测与波浪线的碰撞：找到最邻近线索引
+      const idx = clamp(Math.round(r.y / SETTINGS.lineSpacing), 0, lineCount - 1);
+      const yOnWave = sampleWaveY(idx, r.x, t);
+      const hitThreshold = SETTINGS.lineWidth * 0.6;
+
+      // 如果雨滴接近波浪线且冷却完毕
+      if (Math.abs(r.y - yOnWave) < hitThreshold && r.cooldown <= 0) {
+        // 概率生成墨滴
+        if (Math.random() < SETTINGS.inkSpawnChance) {
+          spawnInk(r.x, yOnWave);
+        }
+        // 避免连续命中
+        r.cooldown = 0.15 + Math.random() * 0.2;
+      }
+    }
+  }
+
+  /**
+   * 绘制雨滴
+   */
+  function drawRain() {
+    ctx.strokeStyle = 'rgba(0,0,0,0.17)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (const r of raindrops) {
+      ctx.moveTo(r.x, r.y - r.len);
+      ctx.lineTo(r.x, r.y);
+    }
+    ctx.stroke();
+  }
+
+  // ====================================================================
+  // 墨滴晕染系统（离屏合成）
+  // ====================================================================
+
+  /**
+   * 生成一个墨滴（在 inkCanvas 上绘制）
+   */
+  function spawnInk(x, y) {
+    const radius = rand(SETTINGS.inkRadiusMin, SETTINGS.inkRadiusMax);
+    inkCtx.save();
+    inkCtx.globalAlpha = SETTINGS.inkAlpha;
+    inkCtx.filter = `blur(${SETTINGS.inkBlur}px)`;
+    inkCtx.fillStyle = '#000'; // 纯黑，比波浪线更深
+    inkCtx.beginPath();
+    inkCtx.arc(x, y, radius, 0, Math.PI * 2);
+    inkCtx.fill();
+    inkCtx.restore();
+  }
+
+  /**
+   * 墨滴逐帧衰减（destination-out 清除部分 alpha）
+   */
+  function decayInk() {
+    inkCtx.save();
+    inkCtx.globalCompositeOperation = 'destination-out';
+    inkCtx.fillStyle = `rgba(0,0,0,${SETTINGS.inkDecay})`;
+    inkCtx.fillRect(0, 0, W, H);
+    inkCtx.restore();
+  }
+
+  /**
+   * 用波浪遮罩将墨滴裁剪到线条区域
+   * 实现"墨滴仅在波浪线上可见"的效果
+   */
+  function maskInkToWaves() {
+    const wctx = inkMaskedCtx;
+    wctx.clearRect(0, 0, W, H);
+
+    // 1) 先画波浪遮罩（白色线条）
+    wctx.globalCompositeOperation = 'source-over';
+    wctx.drawImage(waveMaskCanvas, 0, 0);
+
+    // 2) 使用 source-in 仅保留波浪区域部分的墨滴
+    wctx.globalCompositeOperation = 'source-in';
+    wctx.drawImage(inkCanvas, 0, 0);
+
+    // 3) 恢复默认
+    wctx.globalCompositeOperation = 'source-over';
+  }
+
+  // ====================================================================
+  // 波浪绘制与取样
+  // ====================================================================
+
+  /**
+   * 采样第 i 条波浪线在横坐标 x、时间 t 处的 y 坐标
+   */
+  function sampleWaveY(i, x, t) {
+    // 基准 y：按行距排列
+    const baseY = i * SETTINGS.lineSpacing;
+
+    // 每条线带有独立相位/振幅微扰，增加自然感
+    const amp = SETTINGS.baseAmp * (1 + (Math.sin(i * 0.6) * SETTINGS.ampJitter)) * ampMul;
+    const spd = SETTINGS.baseSpeed * (1 + (Math.cos(i * 0.7) * SETTINGS.speedJitter)) * speedMul;
+    const phase = phases[i] + t * spd * 2.5;
+
+    // 正弦波叠加
+    const y = baseY + Math.sin(x * SETTINGS.freq + phase) * amp;
+    return y;
+  }
+
+  /**
+   * 采样第 i 条波浪线在横坐标 x、时间 t 处的斜率 dy/dx
+   */
+  function sampleWaveSlope(i, x, t) {
+    const amp = SETTINGS.baseAmp * (1 + (Math.sin(i * 0.6) * SETTINGS.ampJitter)) * ampMul;
+    const spd = SETTINGS.baseSpeed * (1 + (Math.cos(i * 0.7) * SETTINGS.speedJitter)) * speedMul;
+    const phase = phases[i] + t * spd * 2.5;
+
+    // dy/dx = amp * freq * cos(...)
+    const slope = Math.cos(x * SETTINGS.freq + phase) * amp * SETTINGS.freq;
+    return slope;
+  }
+
+  /**
+   * 绘制波浪线到主画布和遮罩画布
+   */
+  function drawWaves() {
+    // 主画布绘制波浪线
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = SETTINGS.lineWidth;
+    ctx.strokeStyle = SETTINGS.waveColor;
+
+    // 遮罩画布绘制白色波浪线（用于墨滴裁剪）
+    waveMaskCtx.clearRect(0, 0, W, H);
+    waveMaskCtx.lineCap = 'round';
+    waveMaskCtx.lineJoin = 'round';
+    waveMaskCtx.lineWidth = SETTINGS.lineWidth;
+    waveMaskCtx.strokeStyle = '#fff';
+
+    const t = performance.now() * 0.001;
+    const stepX = 6; // 横向采样步长，平衡细腻与性能
+
+    for (let i = 0; i < lineCount; i++) {
+      ctx.beginPath();
+      waveMaskCtx.beginPath();
+
+      for (let x = 0; x <= W; x += stepX) {
+        const y = sampleWaveY(i, x, t);
+        if (x === 0) {
+          ctx.moveTo(x, y);
+          waveMaskCtx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+          waveMaskCtx.lineTo(x, y);
+        }
+      }
+
+      ctx.stroke();
+      waveMaskCtx.stroke();
+    }
+  }
+
+  /**
+   * 仅绘制遮罩（用于初次/尺寸变化）
+   */
+  function drawWaveMask() {
+    waveMaskCtx.clearRect(0, 0, W, H);
+    waveMaskCtx.lineCap = 'round';
+    waveMaskCtx.lineJoin = 'round';
+    waveMaskCtx.lineWidth = SETTINGS.lineWidth;
+    waveMaskCtx.strokeStyle = '#fff';
+
+    const t = performance.now() * 0.001;
+    const stepX = 6;
+
+    for (let i = 0; i < lineCount; i++) {
+      waveMaskCtx.beginPath();
+      for (let x = 0; x <= W; x += stepX) {
+        const y = sampleWaveY(i, x, t);
+        if (x === 0) waveMaskCtx.moveTo(x, y);
+        else waveMaskCtx.lineTo(x, y);
+      }
+      waveMaskCtx.stroke();
+    }
+  }
+
+  // ====================================================================
+  // 木筏与小人更新逻辑
+  // ====================================================================
+
+  /**
+   * 更新木筏与小人的位置、角度、状态
+   */
+  function updateRaft(dt) {
+    const t = performance.now() * 0.001;
+
+    // 取中线索引作为承载曲线
+    const i = clamp(Math.round(raft.y / SETTINGS.lineSpacing), 0, lineCount - 1);
+    const waterY = sampleWaveY(i, raft.x, t);
+    const slope = sampleWaveSlope(i, raft.x, t);
+    const angle = clamp(Math.atan(slope), -SETTINGS.raftTiltLimit, SETTINGS.raftTiltLimit);
+
+    // 额外下沉取决于是否抛弃/保护
+    let sink = 0;
+    if (storyState === State.ChosenKeep || storyState === State.Capsizing || storyState === State.Survive) {
+      sink = SETTINGS.raftSinkKeep;
+    } else if (storyState === State.ChosenDrop || storyState === State.Escaped) {
+      sink = SETTINGS.raftSinkDrop;
+    }
+
+    // ========== 倾覆动画控制 ==========
+    if (storyState === State.Capsizing) {
+      storyTimer += dt;
+      const p = clamp(storyTimer / SETTINGS.capsizeTime, 0, 1);
+
+      // 旋转到 120~180 度（超过120度）
+      const extra = easeInOut(p) * Math.PI * 0.92; // 约165度
+      raft.angle = angle + extra;
+
+      // 40% 进度后人物开始下沉
+      raft.person.sinking = p > 0.4;
+      if (raft.person.sinking) {
+        raft.person.sinkY += SETTINGS.sinkSpeed * dt;
+        raft.person.alpha = clamp(1 - (p - 0.4) / 0.6, 0, 1);
+      }
+
+      // 动画完成
+      if (p >= 1) {
+        storyState = State.Sinking;
+        toastMsg('风浪太大，小人被掀翻落水。');
+      }
+    }
+    // ========== 已倾覆，继续下沉 ==========
+    else if (storyState === State.Sinking) {
+      raft.angle += 0.06; // 倾覆后继续漂转
+      raft.person.sinking = true;
+      raft.person.sinkY += SETTINGS.sinkSpeed * dt;
+      raft.person.alpha = Math.max(0, raft.person.alpha - 0.25 * dt);
+    }
+    // ========== 保护宝藏，艰难穿越 ==========
+    else if (storyState === State.Survive) {
+      storyTimer += dt;
+      const p = clamp(storyTimer / SETTINGS.surviveDriftTime, 0, 1);
+      raft.drift = p;
+      raft.x = lerp(W * 0.5, W * 0.8, easeInOut(p));
+      raft.angle = angle; // 保持波浪倾斜
+
+      if (p >= 1) {
+        toastMsg('惊涛骇浪，仍然挺了过来。');
+      }
+    }
+    // ========== 抛弃宝藏，顺利穿越 ==========
+    else if (storyState === State.Escaped) {
+      storyTimer += dt;
+      const p = clamp(storyTimer / SETTINGS.escapeDriftTime, 0, 1);
+      raft.drift = p;
+      raft.x = lerp(W * 0.5, W * 0.88, easeInOut(p));
+      raft.angle = angle * 0.4; // 更稳定（倾斜减弱）
+
+      if (p >= 1) {
+        toastMsg('轻装上阵，顺利穿越。');
+      }
+    }
+    // ========== 常规状态 ==========
+    else {
+      raft.angle = angle;
+    }
+
+    // 更新木筏 y 坐标
+    raft.y = waterY + sink;
+
+    // 更新人物位置（未下沉时跟随木筏）
+    if (!raft.person.sinking) {
+      raft.person.x = raft.x;
+      raft.person.y = raft.y - SETTINGS.raftHeight * 2;
+    }
+  }
+
+  /**
+   * 绘制木筏与小人
+   */
+  function drawRaftAndPerson() {
+    // ========== 绘制木筏 ==========
+    ctx.save();
+    ctx.translate(raft.x, raft.y);
+    ctx.rotate(raft.angle);
+    ctx.fillStyle = '#111';
+    ctx.fillRect(-SETTINGS.raftWidth / 2, -SETTINGS.raftHeight / 2, SETTINGS.raftWidth, SETTINGS.raftHeight);
+
+    // 纹理刻痕
+    ctx.fillStyle = '#000';
+    ctx.globalAlpha = 0.25;
+    for (let i = -2; i <= 2; i++) {
+      ctx.fillRect(-SETTINGS.raftWidth * 0.48 + i * 14, -SETTINGS.raftHeight * 0.5, 3, SETTINGS.raftHeight);
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
+
+    // ========== 绘制小人（剪影） ==========
+    ctx.save();
+    ctx.globalAlpha = raft.person.alpha;
+    ctx.fillStyle = '#000';
+
+    const px = raft.person.sinking ? raft.person.x : raft.x;
+    const py = raft.person.sinking ? raft.person.sinkY : (raft.y - SETTINGS.raftHeight * 2);
+
+    // 头部
+    ctx.beginPath();
+    ctx.arc(px, py - 18, 8, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 身体
+    ctx.fillRect(px - 3, py - 18, 6, 20);
+
+    // 手臂
+    ctx.fillRect(px - 10, py - 12, 8, 3);
+    ctx.fillRect(px + 2, py - 12, 8, 3);
+
+    // 双腿
+    ctx.fillRect(px - 7, py + 2, 5, 10);
+    ctx.fillRect(px + 2, py + 2, 5, 10);
+
+    ctx.restore();
+  }
+
+  // ====================================================================
+  // 背景天空
+  // ====================================================================
+
+  /**
+   * 绘制天空渐变背景
+   */
+  function drawSky() {
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, SETTINGS.bgTop);
+    g.addColorStop(1, SETTINGS.bgBottom);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  // ====================================================================
+  // 主循环
+  // ====================================================================
+
+  /**
+   * 每帧更新与绘制
+   */
+  function tick() {
+    const now = performance.now();
+    const dt = Math.min(0.033, (now - lastT) / 1000); // clamp 30fps dt
+    lastT = now;
+
+    // ========== 缓动悬停参数 ==========
+    const targetAmp = isHover ? SETTINGS.hoverAmpMul : 1.0;
+    const targetSpeed = isHover ? SETTINGS.hoverSpeedMul : 1.0;
+    ampMul = lerp(ampMul, targetAmp, 0.06);
+    speedMul = lerp(speedMul, targetSpeed, 0.06);
+
+    // ========== 更新逻辑 ==========
+    updateRain(dt);
+    decayInk();
+    updateRaft(dt);
+
+    // ========== 绘制图层 ==========
+    // 1) 天空背景
+    drawSky();
+
+    // 2) 雨滴
+    drawRain();
+
+    // 3) 波浪线（主画布 + 遮罩画布）
+    drawWaves();
+
+    // 4) 墨滴晕染（裁剪到波浪线区域）
+    maskInkToWaves();
+    ctx.globalAlpha = 0.9;
+    ctx.drawImage(inkMaskedCanvas, 0, 0);
+    ctx.globalAlpha = 1.0;
+
+    // 5) 木筏与小人
+    drawRaftAndPerson();
+
+    requestAnimationFrame(tick);
+  }
+
+  // ====================================================================
+  // 交互事件处理
+  // ====================================================================
+
+  /**
+   * 设置悬停/触摸状态
+   */
+  function setHover(on) {
+    isHover = !!on;
+  }
+
+  // 鼠标悬停
+  canvas.addEventListener('pointerenter', () => setHover(true));
+  canvas.addEventListener('pointerleave', () => setHover(false));
+
+  // 触摸/点击
+  canvas.addEventListener('pointerdown', () => setHover(true));
+  window.addEventListener('pointerup', () => setHover(false));
+
+  // ========== 决策按钮 ==========
+
+  /**
+   * 保护宝藏：40% 概率倾覆
+   */
+  keepBtn.addEventListener('click', () => {
+    if (storyState !== State.Idle) return;
+
+    storyState = State.ChosenKeep;
+    const roll = Math.random();
+    capsizeTarget = roll < SETTINGS.capsizeProb;
+
+    if (capsizeTarget) {
+      // 触发倾覆
+      storyState = State.Capsizing;
+      storyTimer = 0;
+      toastMsg('你选择保护宝藏，风浪更急……');
+    } else {
+      // 艰难穿越
+      storyState = State.Survive;
+      storyTimer = 0;
+      toastMsg('你选择保护宝藏，紧咬牙关继续前行。');
+    }
+  });
+
+  /**
+   * 抛弃宝藏：稳定穿越
+   */
+  dropBtn.addEventListener('click', () => {
+    if (storyState !== State.Idle) return;
+
+    storyState = State.Escaped;
+    storyTimer = 0;
+    toastMsg('你抛弃了宝藏，船身更稳了。');
+  });
+
+  /**
+   * 重置按钮
+   */
+  resetBtn.addEventListener('click', () => resetStory());
+
+  // ========== 键盘快捷键 ==========
+  // Enter = 保护宝藏, Shift+Enter = 抛弃宝藏
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      if (e.shiftKey) dropBtn.click();
+      else keepBtn.click();
+    }
+  });
+
+  // ====================================================================
+  // 剧情重置与提示
+  // ====================================================================
+
+  /**
+   * 重置剧情状态
+   */
+  function resetStory() {
+    storyState = State.Idle;
+    storyTimer = 0;
+    capsizeTarget = false;
+    raft.x = W * 0.5;
+    raft.y = H * 0.5;
+    raft.angle = 0;
+    raft.drift = 0;
+    raft.person.x = raft.x;
+    raft.person.y = raft.y - SETTINGS.raftHeight * 2;
+    raft.person.alive = true;
+    raft.person.sinking = false;
+    raft.person.sinkY = raft.person.y;
+    raft.person.alpha = 1;
+    toastHide();
+  }
+
+  /**
+   * 显示提示消息
+   */
+  function toastMsg(msg) {
+    toast.textContent = msg;
+    toast.classList.add('show');
+  }
+
+  /**
+   * 隐藏提示消息
+   */
+  function toastHide() {
+    toast.classList.remove('show');
+  }
+
+  // ====================================================================
+  // 启动应用
+  // ====================================================================
+  resize();
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>
