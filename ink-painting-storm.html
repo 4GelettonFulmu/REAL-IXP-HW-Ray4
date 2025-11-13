@@ -2,34 +2,49 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
 <title>水墨风波浪 - 抉择之筏 | Ink Painting Storm</title>
 <style>
   /* ==================== 全局样式 ==================== */
+  * {
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+  }
+
   html, body {
     margin: 0;
     padding: 0;
     background: #f6f6f6; /* 纸面底色偏浅，衬出深墨 */
+    width: 100%;
     height: 100%;
     overflow: hidden;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC",
                  "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, "Noto Sans CJK SC",
                  sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   /* 主画布 */
   #stage {
     position: fixed;
-    inset: 0;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
     display: block;
-    cursor: pointer;
+    touch-action: none;
   }
 
   /* ==================== UI 层 ==================== */
   .ui {
     position: fixed;
-    inset: 0;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
     pointer-events: none;
+    z-index: 10;
   }
 
   /* 顶部标题与选项区 */
@@ -40,6 +55,7 @@
     transform: translateX(-50%);
     text-align: center;
     pointer-events: auto;
+    max-width: 90%;
   }
 
   .title {
@@ -61,6 +77,8 @@
   .choices {
     display: inline-flex;
     gap: 12px;
+    flex-wrap: wrap;
+    justify-content: center;
   }
 
   /* 决策按钮样式 */
@@ -68,12 +86,16 @@
     background: #111;
     color: #fff;
     border: none;
-    padding: 10px 16px;
+    padding: 10px 20px;
     border-radius: 999px;
     cursor: pointer;
     box-shadow: 0 2px 8px rgba(0,0,0,.1);
     transition: transform .12s ease, box-shadow .2s ease, background .2s ease;
     font-size: 14px;
+    font-weight: 500;
+    min-width: 120px;
+    user-select: none;
+    -webkit-user-select: none;
   }
 
   button.choice:hover {
@@ -86,26 +108,35 @@
     transform: translateY(0);
   }
 
+  button.choice:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
   /* 底部提示消息 */
   .toast {
     position: absolute;
     left: 50%;
     bottom: 6vh;
     transform: translateX(-50%);
-    background: rgba(17,17,17,.9);
+    background: rgba(17,17,17,.92);
     color: #fff;
-    padding: 10px 14px;
+    padding: 12px 18px;
     border-radius: 10px;
-    font-size: 13px;
+    font-size: 14px;
     letter-spacing: .5px;
     pointer-events: auto;
-    display: none;
-    max-width: 80%;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity .3s ease, visibility .3s ease;
+    max-width: 85%;
     text-align: center;
+    line-height: 1.5;
   }
 
   .toast.show {
-    display: inline-block;
+    opacity: 1;
+    visibility: visible;
   }
 
   /* 重置按钮容器 */
@@ -118,17 +149,24 @@
 
   .reset-btn {
     border: none;
-    background: rgba(17,17,17,.85);
+    background: rgba(17,17,17,.88);
     color: #fff;
-    padding: 8px 12px;
+    padding: 10px 16px;
     border-radius: 8px;
     cursor: pointer;
     font-size: 13px;
-    transition: background .2s ease;
+    transition: background .2s ease, transform .1s ease;
+    user-select: none;
+    -webkit-user-select: none;
   }
 
   .reset-btn:hover {
     background: rgba(0,0,0,.95);
+    transform: translateY(-1px);
+  }
+
+  .reset-btn:active {
+    transform: translateY(0);
   }
 
   /* 操作提示 */
@@ -137,24 +175,32 @@
     left: 50%;
     bottom: 12vh;
     transform: translateX(-50%);
-    color: #444;
-    opacity: .9;
+    color: #555;
+    opacity: .85;
     font-size: 12px;
     letter-spacing: .5px;
     text-align: center;
+    max-width: 90%;
   }
 
   /* 响应式调整 */
   @media (max-width: 600px) {
     .title {
-      font-size: 16px;
+      font-size: 18px;
     }
     .subtitle {
-      font-size: 12px;
+      font-size: 13px;
     }
     .choices {
       flex-direction: column;
-      gap: 8px;
+      gap: 10px;
+    }
+    button.choice {
+      min-width: 140px;
+    }
+    .hint {
+      font-size: 11px;
+      bottom: 14vh;
     }
   }
 </style>
@@ -189,7 +235,7 @@
 </div>
 
 <script>
-;(() => {
+;(function() {
   'use strict';
 
   // ====================================================================
@@ -253,7 +299,7 @@
 
   // 主画布
   const canvas = document.getElementById('stage');
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d', { alpha: false });
 
   // 离屏画布：墨滴层
   const inkCanvas = document.createElement('canvas');
@@ -296,6 +342,7 @@
   let storyState = State.Idle;
   let storyTimer = 0;
   let capsizeTarget = false;  // 是否触发倾覆
+  let messageShown = false;   // 防止重复显示消息
 
   // ====================================================================
   // 木筏与小人数据结构
@@ -360,6 +407,44 @@
   }
 
   // ====================================================================
+  // 波浪函数（需要在使用前定义）
+  // ====================================================================
+
+  /**
+   * 采样第 i 条波浪线在横坐标 x、时间 t 处的 y 坐标
+   */
+  function sampleWaveY(i, x, t) {
+    if (i < 0 || i >= lineCount) return 0;
+
+    // 基准 y：按行距排列
+    const baseY = i * SETTINGS.lineSpacing;
+
+    // 每条线带有独立相位/振幅微扰，增加自然感
+    const amp = SETTINGS.baseAmp * (1 + (Math.sin(i * 0.6) * SETTINGS.ampJitter)) * ampMul;
+    const spd = SETTINGS.baseSpeed * (1 + (Math.cos(i * 0.7) * SETTINGS.speedJitter)) * speedMul;
+    const phase = phases[i] + t * spd * 2.5;
+
+    // 正弦波叠加
+    const y = baseY + Math.sin(x * SETTINGS.freq + phase) * amp;
+    return y;
+  }
+
+  /**
+   * 采样第 i 条波浪线在横坐标 x、时间 t 处的斜率 dy/dx
+   */
+  function sampleWaveSlope(i, x, t) {
+    if (i < 0 || i >= lineCount) return 0;
+
+    const amp = SETTINGS.baseAmp * (1 + (Math.sin(i * 0.6) * SETTINGS.ampJitter)) * ampMul;
+    const spd = SETTINGS.baseSpeed * (1 + (Math.cos(i * 0.7) * SETTINGS.speedJitter)) * speedMul;
+    const phase = phases[i] + t * spd * 2.5;
+
+    // dy/dx = amp * freq * cos(...)
+    const slope = Math.cos(x * SETTINGS.freq + phase) * amp * SETTINGS.freq;
+    return slope;
+  }
+
+  // ====================================================================
   // 尺寸调整与初始化
   // ====================================================================
   function resize() {
@@ -378,7 +463,9 @@
       c.style.width = cssW + 'px';
       c.style.height = cssH + 'px';
       const cctx = c.getContext('2d');
-      cctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      if (cctx) {
+        cctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      }
     });
 
     // 计算波浪线条数（从上到下填满屏幕）
@@ -473,6 +560,7 @@
   function drawRain() {
     ctx.strokeStyle = 'rgba(0,0,0,0.17)';
     ctx.lineWidth = 1;
+    ctx.lineCap = 'round';
     ctx.beginPath();
     for (const r of raindrops) {
       ctx.moveTo(r.x, r.y - r.len);
@@ -492,7 +580,14 @@
     const radius = rand(SETTINGS.inkRadiusMin, SETTINGS.inkRadiusMax);
     inkCtx.save();
     inkCtx.globalAlpha = SETTINGS.inkAlpha;
-    inkCtx.filter = `blur(${SETTINGS.inkBlur}px)`;
+
+    // 使用 filter 或降级到无模糊
+    try {
+      inkCtx.filter = `blur(${SETTINGS.inkBlur}px)`;
+    } catch (e) {
+      // 浏览器不支持 filter，忽略模糊
+    }
+
     inkCtx.fillStyle = '#000'; // 纯黑，比波浪线更深
     inkCtx.beginPath();
     inkCtx.arc(x, y, radius, 0, Math.PI * 2);
@@ -532,38 +627,8 @@
   }
 
   // ====================================================================
-  // 波浪绘制与取样
+  // 波浪绘制
   // ====================================================================
-
-  /**
-   * 采样第 i 条波浪线在横坐标 x、时间 t 处的 y 坐标
-   */
-  function sampleWaveY(i, x, t) {
-    // 基准 y：按行距排列
-    const baseY = i * SETTINGS.lineSpacing;
-
-    // 每条线带有独立相位/振幅微扰，增加自然感
-    const amp = SETTINGS.baseAmp * (1 + (Math.sin(i * 0.6) * SETTINGS.ampJitter)) * ampMul;
-    const spd = SETTINGS.baseSpeed * (1 + (Math.cos(i * 0.7) * SETTINGS.speedJitter)) * speedMul;
-    const phase = phases[i] + t * spd * 2.5;
-
-    // 正弦波叠加
-    const y = baseY + Math.sin(x * SETTINGS.freq + phase) * amp;
-    return y;
-  }
-
-  /**
-   * 采样第 i 条波浪线在横坐标 x、时间 t 处的斜率 dy/dx
-   */
-  function sampleWaveSlope(i, x, t) {
-    const amp = SETTINGS.baseAmp * (1 + (Math.sin(i * 0.6) * SETTINGS.ampJitter)) * ampMul;
-    const spd = SETTINGS.baseSpeed * (1 + (Math.cos(i * 0.7) * SETTINGS.speedJitter)) * speedMul;
-    const phase = phases[i] + t * spd * 2.5;
-
-    // dy/dx = amp * freq * cos(...)
-    const slope = Math.cos(x * SETTINGS.freq + phase) * amp * SETTINGS.freq;
-    return slope;
-  }
 
   /**
    * 绘制波浪线到主画布和遮罩画布
@@ -609,6 +674,8 @@
    * 仅绘制遮罩（用于初次/尺寸变化）
    */
   function drawWaveMask() {
+    if (lineCount === 0) return;
+
     waveMaskCtx.clearRect(0, 0, W, H);
     waveMaskCtx.lineCap = 'round';
     waveMaskCtx.lineJoin = 'round';
@@ -670,9 +737,10 @@
       }
 
       // 动画完成
-      if (p >= 1) {
+      if (p >= 1 && !messageShown) {
         storyState = State.Sinking;
         toastMsg('风浪太大，小人被掀翻落水。');
+        messageShown = true;
       }
     }
     // ========== 已倾覆，继续下沉 ==========
@@ -690,8 +758,9 @@
       raft.x = lerp(W * 0.5, W * 0.8, easeInOut(p));
       raft.angle = angle; // 保持波浪倾斜
 
-      if (p >= 1) {
+      if (p >= 1 && !messageShown) {
         toastMsg('惊涛骇浪，仍然挺了过来。');
+        messageShown = true;
       }
     }
     // ========== 抛弃宝藏，顺利穿越 ==========
@@ -702,8 +771,9 @@
       raft.x = lerp(W * 0.5, W * 0.88, easeInOut(p));
       raft.angle = angle * 0.4; // 更稳定（倾斜减弱）
 
-      if (p >= 1) {
+      if (p >= 1 && !messageShown) {
         toastMsg('轻装上阵，顺利穿越。');
+        messageShown = true;
       }
     }
     // ========== 常规状态 ==========
@@ -840,22 +910,27 @@
   }
 
   // 鼠标悬停
-  canvas.addEventListener('pointerenter', () => setHover(true));
-  canvas.addEventListener('pointerleave', () => setHover(false));
+  canvas.addEventListener('pointerenter', function() { setHover(true); });
+  canvas.addEventListener('pointerleave', function() { setHover(false); });
 
   // 触摸/点击
-  canvas.addEventListener('pointerdown', () => setHover(true));
-  window.addEventListener('pointerup', () => setHover(false));
+  canvas.addEventListener('pointerdown', function() { setHover(true); });
+  window.addEventListener('pointerup', function() { setHover(false); });
 
   // ========== 决策按钮 ==========
 
   /**
    * 保护宝藏：40% 概率倾覆
    */
-  keepBtn.addEventListener('click', () => {
+  keepBtn.addEventListener('click', function() {
     if (storyState !== State.Idle) return;
 
+    // 禁用按钮
+    keepBtn.disabled = true;
+    dropBtn.disabled = true;
+
     storyState = State.ChosenKeep;
+    messageShown = false;
     const roll = Math.random();
     capsizeTarget = roll < SETTINGS.capsizeProb;
 
@@ -875,23 +950,31 @@
   /**
    * 抛弃宝藏：稳定穿越
    */
-  dropBtn.addEventListener('click', () => {
+  dropBtn.addEventListener('click', function() {
     if (storyState !== State.Idle) return;
+
+    // 禁用按钮
+    keepBtn.disabled = true;
+    dropBtn.disabled = true;
 
     storyState = State.Escaped;
     storyTimer = 0;
+    messageShown = false;
     toastMsg('你抛弃了宝藏，船身更稳了。');
   });
 
   /**
    * 重置按钮
    */
-  resetBtn.addEventListener('click', () => resetStory());
+  resetBtn.addEventListener('click', function() {
+    resetStory();
+  });
 
   // ========== 键盘快捷键 ==========
   // Enter = 保护宝藏, Shift+Enter = 抛弃宝藏
-  window.addEventListener('keydown', (e) => {
+  window.addEventListener('keydown', function(e) {
     if (e.key === 'Enter') {
+      e.preventDefault();
       if (e.shiftKey) dropBtn.click();
       else keepBtn.click();
     }
@@ -908,6 +991,8 @@
     storyState = State.Idle;
     storyTimer = 0;
     capsizeTarget = false;
+    messageShown = false;
+
     raft.x = W * 0.5;
     raft.y = H * 0.5;
     raft.angle = 0;
@@ -918,6 +1003,11 @@
     raft.person.sinking = false;
     raft.person.sinkY = raft.person.y;
     raft.person.alpha = 1;
+
+    // 重新启用按钮
+    keepBtn.disabled = false;
+    dropBtn.disabled = false;
+
     toastHide();
   }
 
@@ -939,8 +1029,20 @@
   // ====================================================================
   // 启动应用
   // ====================================================================
-  resize();
-  requestAnimationFrame(tick);
+
+  // 错误处理
+  window.addEventListener('error', function(e) {
+    console.error('Runtime error:', e.error);
+  });
+
+  // 初始化
+  try {
+    resize();
+    requestAnimationFrame(tick);
+  } catch (error) {
+    console.error('Initialization error:', error);
+    alert('抱歉，页面初始化失败。请尝试刷新页面或使用现代浏览器。');
+  }
 })();
 </script>
 </body>
